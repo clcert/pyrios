@@ -625,10 +625,16 @@ func (vote *Ballot) ExtractResult(e *Election) Result {
 // big integer values of the form "[0-9]+" into [0-9]+ (i.e., it removes the
 // quotes from big integers). This is necessary to get big.Int to unmarshal the
 // values from JSON as big integers.
-func GetJSON(addr string, v interface{}) ([]byte, error) {
+func GetJSON(addr string, v interface{}, client *http.Client) ([]byte, error) {
 	var err error
 	var jsonData []byte
-	resp, err := http.Get(addr)
+
+	req, err := http.NewRequest("GET", addr, nil)
+	if err != nil {
+		glog.Errorf("Could not create request to Helios server: %s\n", err)
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		glog.Errorf("Could not get data from the Helios server: %s\n", err)
 		return nil, err

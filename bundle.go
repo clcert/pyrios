@@ -15,6 +15,13 @@
 package pyrios
 
 import (
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"regexp"
+
 	"github.com/golang/glog"
 )
 
@@ -90,13 +97,23 @@ func (b *ElectionBundle) Instantiate() error {
 }
 
 // Download gets an election bundle from the helios server using the given
-// election uuid.
-func Download(server string, uuid string) (*ElectionBundle, error) {
-	elecAddr := server + uuid
+// election uuid. Username and password are required to login to Helios server
+// if the election is private.
+func Download(server string, uuid string, username, password string) (*ElectionBundle, error) {
+	elecAddr := server + "app/elections/" + uuid
 	b := new(ElectionBundle)
 
+	client := http.DefaultClient
 	var err error
-	if b.ElectionData, err = GetJSON(elecAddr, &b.Election); err != nil {
+	if username != "" && password != "" {
+		client, err = getLoggedInClient(server, username, password)
+		if err != nil {
+			glog.Error("Couldn't log in: ", err)
+			return nil, err
+		}
+	}
+
+	if b.ElectionData, err = GetJSON(elecAddr, &b.Election, client); err != nil {
 		glog.Error("Couldn't get the election data: ", err)
 		return nil, err
 	}
@@ -116,7 +133,7 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 		// Helios accepts "after=" as specifying the beginning of the
 		// list.
 		addr := elecAddr + "/voters/?after=" + after + "&limit=100"
-		votersJSON, err = GetJSON(addr, &tempVoters)
+		votersJSON, err = GetJSON(addr, &tempVoters, client)
 		if err != nil {
 			glog.Error("Couldn't get the voter information")
 			return nil, err
@@ -139,7 +156,7 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 	for _, v := range b.Voters {
 		glog.Info("Getting voter ", v.Uuid)
 		var vote *CastBallot
-		jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", &vote)
+		jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", &vote, client)
 		if err != nil {
 			glog.Errorf("Couldn't get the last ballot cast by %s\n", v.Uuid)
 		}
@@ -157,12 +174,12 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 	glog.Info("Collected ", len(b.Votes), " cast ballots for the retally")
 
 	// The trustee information is a list of Trustees.
-	if b.TrusteesData, err = GetJSON(elecAddr+"/trustees/", &b.Trustees); err != nil {
+	if b.TrusteesData, err = GetJSON(elecAddr+"/trustees/", &b.Trustees, client); err != nil {
 		glog.Error("Couldn't get the list of trustees: ", err)
 		return nil, err
 	}
 
-	if b.ResultsData, err = GetJSON(elecAddr+"/result", &b.Results); err != nil {
+	if b.ResultsData, err = GetJSON(elecAddr+"/result", &b.Results, client); err != nil {
 		glog.Info("Couldn't get the result of the election: ", err)
 		// Let the result be null if we can't get it. Helios will warn
 		// about this later.
@@ -174,4 +191,40 @@ func Download(server string, uuid string) (*ElectionBundle, error) {
 // Verify checks that the given election bundle passes retally verification.
 func (b *ElectionBundle) Verify() bool {
 	return b.Election.Retally(b.Votes, b.Results, b.Trustees)
+}
+
+func getLoggedInClient(server, username, password string) (*http.Client, error) {
+	loginUrl := server + "auth/password/login"
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar: jar,
+	}
+
+	csrfResponse, err := client.Get(loginUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	defer csrfResponse.Body.Close()
+	body, err := ioutil.ReadAll(csrfResponse.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	csrfRegex := regexp.MustCompile("name=\"csrf_token\" value=\"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\"")
+	csrfMatches := csrfRegex.FindSubmatch(body)
+	if len(csrfMatches) != 2 {
+		return nil, fmt.Errorf("unable to find csrf token")
+	}
+	csrf := string(csrfMatches[len(csrfMatches)-1])
+
+	loginResponse, err := client.PostForm(loginUrl, url.Values{"csrf_token": {csrf}, "username": {username}, "password": {password}})
+	if err != nil {
+		return nil, err
+	}
+	defer loginResponse.Body.Close()
+	if loginResponse.StatusCode != 200 {
+		return nil, fmt.Errorf("wrong username or password")
+	}
+	return client, nil
 }

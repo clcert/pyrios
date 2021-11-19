@@ -21,16 +21,18 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/google/pyrios"
+	"github.com/clcert/pyrios"
 )
 
 func main() {
 	var electionUuid = flag.String("uuid", "", "The uuid of the election to download")
-	var heliosServer = flag.String("server", "https://vote.heliosvoting.org/helios/elections/", "The server to download the election from")
+	var heliosServer = flag.String("server", "https://participa.uchile.cl/vota/", "The server to download the election from")
 	var bundleFile = flag.String("bundle", "", "The file to write the bundle into")
 	var download = flag.Bool("download", true, "Whether or not to download the bundle")
 	var verify = flag.Bool("verify", false, "Whether or not to verify the downloaded bundle")
 	var write = flag.Bool("write", true, "Whether or not to write the downloaded bundle to a file")
+	var username = flag.String("username", "", "Username used in admin panel. Required for private elections.")
+	var password = flag.String("password", "", "Password used in admin panel. Required for private elections.")
 	flag.Parse()
 
 	if len(*electionUuid) == 0 {
@@ -47,7 +49,7 @@ func main() {
 	var err error
 	if *download {
 		fmt.Println("Downloading election information and ballots. This might take a long time.")
-		b, err = pyrios.Download(*heliosServer, *electionUuid)
+		b, err = pyrios.Download(*heliosServer, *electionUuid, *username, *password)
 		if err != nil {
 			panic(err)
 		}

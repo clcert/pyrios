@@ -1025,7 +1025,7 @@ func TestElectionVerification(t *testing.T) {
 		t.Skip("Couldn't run the election verification test due to lack of certs")
 	}
 
-	b, err := Download(heliosServer, electionUuid)
+	b, err := Download(heliosServer, electionUuid, "", "")
 	if err != nil {
 		t.Fatal("Couldn't download the election with uuid", electionUuid, ":", err)
 	}
@@ -1042,7 +1042,7 @@ func TestElectionBundleSerialization(t *testing.T) {
 		t.Skip("Couldn't run the election bundle serialization test due to lack of certs")
 	}
 
-	b, err := Download(heliosServer, electionUuid)
+	b, err := Download(heliosServer, electionUuid, "", "")
 	if err != nil {
 		t.Fatal("Couldn't download the election with uuid", electionUuid, ":", err)
 	}
@@ -1073,7 +1073,7 @@ func checkCerts() bool {
 
 func TestGetJSONBadAddress(t *testing.T) {
 	var e Election
-	_, err := GetJSON("garbage address", &e)
+	_, err := GetJSON("garbage address", &e, nil)
 	if err == nil {
 		t.Fatal("Incorrectly got JSON from an invalid address")
 	}
@@ -1086,7 +1086,7 @@ func TestGetJSONBadType(t *testing.T) {
 
 	var i int64
 	elecAddr := heliosServer + "b36cbf0c-250a-11e3-89f4-46d2afa631be"
-	_, err := GetJSON(elecAddr, &i)
+	_, err := GetJSON(elecAddr, &i, nil)
 	if err == nil {
 		t.Fatal("Incorrectly got JSON from an invalid address")
 	}
@@ -1109,7 +1109,7 @@ func TestBallotAudit(t *testing.T) {
 	fingerprint := "3HknRw5qRLzxs6UQ1XpE8TQznEbN0t8LtISLSPArCj0"
 	elecAddr := heliosServer + "b36cbf0c-250a-11e3-89f4-46d2afa631be"
 	var e Election
-	electionJSON, err := GetJSON(elecAddr, &e)
+	electionJSON, err := GetJSON(elecAddr, &e, nil)
 	if err != nil {
 		t.Fatal("Couldn't get the election data: ", err)
 	}

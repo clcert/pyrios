@@ -20,7 +20,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/google/pyrios"
+	"github.com/clcert/pyrios"
 )
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 	var e pyrios.Election
 	if *download {
 		elecAddr := *heliosServer + *electionUuid
-		electionJSON, err := pyrios.GetJSON(elecAddr, &e)
+		electionJSON, err := pyrios.GetJSON(elecAddr, &e, nil)
 		if err != nil {
 			panic(err)
 		}

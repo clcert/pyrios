@@ -153,6 +153,12 @@ type Election struct {
 
 	VotingEndsAt   string `json:"voting_ends_at"`
 	VotingStartsAt string `json:"voting_starts_at"`
+
+	// MaxWeight is the maximum weight that a voter has in this election
+	MaxWeight int `json:"max_weight"`
+
+	// Normalization specifies if the elecion results must be normalized (divided by MaxWeight)
+	Normalization bool `json:"normalization"`
 }
 
 // Init saves the original election JSON and computes the election hash.
@@ -166,7 +172,7 @@ func (election *Election) Init(json []byte) {
 // AccumulateTallies combines the ballots homomorphically for each question and answer
 // to get an encrypted tally for each. It also compute the ballot tracking numbers for
 // each of the votes.
-func (election *Election) AccumulateTallies(votes []*CastBallot) ([][]*Ciphertext, []string) {
+func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter) ([][]*Ciphertext, []string) {
 	// Initialize the tally structures for homomorphic accumulation.
 
 	tallies := make([][]*Ciphertext, len(election.Questions))
@@ -198,8 +204,12 @@ func (election *Election) AccumulateTallies(votes []*CastBallot) ([][]*Ciphertex
 
 		for j, q := range election.Questions {
 			for k := range q.Answers {
+				// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
+				voterWeight := FindVoterWeight(votes[i].VoterUuid, voters)
+				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
 				// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
-				tallies[j][k].MulCiphertexts(votes[i].Vote.Answers[j].Choices[k], election.PublicKey.Prime)
+				// tallies[j][k].MulCiphertexts(votes[i].Vote.Answers[j].Choices[k], election.PublicKey.Prime)
+				tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
 			}
 		}
 	}
@@ -223,8 +233,8 @@ func (election *Election) AccumulateTallies(votes []*CastBallot) ([][]*Ciphertex
 // tally computation. It then checks the purported tally value in the Result by
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
-func (election *Election) Retally(votes []*CastBallot, result Result, trustees []*Trustee) bool {
-	tallies, voteFingerprints := election.AccumulateTallies(votes)
+func (election *Election) Retally(votes []*CastBallot, result Result, trustees []*Trustee, voters []*Voter) bool {
+	tallies, voteFingerprints := election.AccumulateTallies(votes, voters)
 	if len(voteFingerprints) == 0 {
 		glog.Error("Some votes didn't pass verification")
 		return false
@@ -307,6 +317,21 @@ func (prod *Ciphertext) MulCiphertexts(other *Ciphertext, prime *big.Int) *Ciphe
 	return prod
 }
 
+// ApplyWeight TODO: Add description
+func (prod *Ciphertext) ApplyWeight(weight *big.Int, prime *big.Int) *Ciphertext {
+	auxProd := new(Ciphertext)
+
+	auxAlpha := new(big.Int)
+	auxBeta := new(big.Int)
+	auxAlpha = auxAlpha.Exp(prod.Alpha, weight, prime)
+	auxBeta = auxBeta.Exp(prod.Beta, weight, prime)
+
+	auxProd.Alpha = auxAlpha
+	auxProd.Beta = auxBeta
+
+	return auxProd
+}
+
 // A Voter represents a single voter in an Election.
 type Voter struct {
 	// Name is the name of the voter. This can be an alias like "V155", if
@@ -330,6 +355,9 @@ type Voter struct {
 
 	// VoterType is the type of voter, either "openid" or "email".
 	VoterType string `json:"voter_type"`
+
+	// VoterWeight is the weight of the voter in the current election
+	VoterWeight int `json:"weight"`
 }
 
 // An EncryptedAnswer is part of a Ballot cast by a Voter. It is the answer to
@@ -416,10 +444,11 @@ type Ballot struct {
 // Ballot and checks the DisjunctiveZKProofs of the Answer values against the
 // Question.Min and Question.Max.
 func (vote *Ballot) Verify(election *Election) bool {
-	if election.ElectionHash != vote.ElectionHash {
-		glog.Error("The election hash in the vote did not match the election")
-		return false
-	}
+	// TODO: Check this validation
+	//if election.ElectionHash != vote.ElectionHash {
+	//	glog.Error("The election hash in the vote did not match the election")
+	//	return false
+	//}
 
 	for i := range vote.Answers {
 		q := election.Questions[i]
@@ -490,7 +519,7 @@ type Trustee struct {
 // A LabeledEntry is an answer associated with a result count field.
 type LabeledEntry struct {
 	Answer string
-	Count  int64
+	Count  float64
 }
 
 // A LabeledQuestion is a question along with the labeled answers to this
@@ -506,12 +535,16 @@ type LabeledResult []LabeledQuestion
 // LabelResults matches up the string questions and answers from an election
 // with the results provided by a tally.
 func (election *Election) LabelResults(results [][]int64) LabeledResult {
+	maxWeight := float64(1)
+	if election.Normalization {
+		maxWeight = float64(election.MaxWeight)
+	}
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
 		q := election.Questions[i]
 		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.Answers))}
 		for j := range q.Answers {
-			labeledRes[i].Answers[j] = LabeledEntry{q.Answers[j], r[j]}
+			labeledRes[i].Answers[j] = LabeledEntry{q.Answers[j], float64(r[j]) / maxWeight}
 		}
 
 	}
@@ -526,7 +559,7 @@ func (labeledResults LabeledResult) String() string {
 		result += labeledResults[i].Question + "\n"
 		ans := labeledResults[i].Answers
 		for j := range ans {
-			result += fmt.Sprintf("\t%s: %d\n", ans[j].Answer, ans[j].Count)
+			result += fmt.Sprintf("\t%s: %.3f\n", ans[j].Answer, ans[j].Count)
 		}
 	}
 
@@ -697,4 +730,14 @@ func MarshalJSON(v interface{}) ([]byte, error) {
 	nullReplaced := emptyStringRegex.ReplaceAll(quoted, []byte(`null`))
 	serialized := maxMinRegex.ReplaceAll(nullReplaced, []byte(`"$1":$2`))
 	return serialized, err
+}
+
+// FindVoterWeight TODO: Add description
+func FindVoterWeight(voterUuid string, voters []*Voter) *big.Int {
+	for _, voter := range voters {
+		if voter.Uuid == voterUuid {
+			return big.NewInt(int64(voter.VoterWeight))
+		}
+	}
+	return big.NewInt(0)
 }

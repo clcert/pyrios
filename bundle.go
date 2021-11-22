@@ -190,7 +190,7 @@ func Download(server string, uuid string, username, password string) (*ElectionB
 
 // Verify checks that the given election bundle passes retally verification.
 func (b *ElectionBundle) Verify() bool {
-	return b.Election.Retally(b.Votes, b.Results, b.Trustees)
+	return b.Election.Retally(b.Votes, b.Results, b.Trustees, b.Voters)
 }
 
 func getLoggedInClient(server, username, password string) (*http.Client, error) {

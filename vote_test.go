@@ -211,7 +211,7 @@ func NewCastBallot(election *Election, answers [][]int64, v *Voter, auditable bo
 }
 
 // NewVoter instantiates a new Voter with the given information and a fresh UUID.
-func NewVoter(name string, id string, computeHash bool, hash string, voterType string) (*Voter, error) {
+func NewVoter(name string, id string, computeHash bool, hash string, voterType string, voterWeight int) (*Voter, error) {
 	uuid, err := GenUUID()
 	if err != nil {
 		glog.Error("Couldn't generate a UUID for a new voter")
@@ -237,7 +237,7 @@ func NewVoter(name string, id string, computeHash bool, hash string, voterType s
 		return nil, errors.New("voter must have type 'openid' or 'email'")
 	}
 
-	return &Voter{name, uuid, id, vidHash, voterType}, nil
+	return &Voter{name, uuid, id, vidHash, voterType, voterWeight}, nil
 }
 
 // Create instantiates a question with the given answer set and other information.
@@ -362,8 +362,8 @@ func GenUUID() (string, error) {
 // Tally computes the tally of an election and returns the result.
 // In the process, it generates partial decryption proofs for each of
 // the partial decryptions computed by the trustee.
-func (e *Election) Tally(votes []*CastBallot, trustees []*Trustee, trusteeSecrets []*big.Int) (Result, error) {
-	tallies, voteFingerprints := e.AccumulateTallies(votes)
+func (e *Election) Tally(votes []*CastBallot, trustees []*Trustee, trusteeSecrets []*big.Int, voters []*Voter) (Result, error) {
+	tallies, voteFingerprints := e.AccumulateTallies(votes, voters)
 	// TODO(tmroeder): maybe we should just skip votes that don't pass verification?
 	// What does the spec say?
 	if len(voteFingerprints) == 0 {

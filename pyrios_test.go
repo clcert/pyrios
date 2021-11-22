@@ -205,7 +205,7 @@ func createRandomVoters(r *rand.Rand, voterCount, maxStrLen int) ([]*Voter, erro
 			voterHash = randomString(hashLen, r)
 		}
 		if voters[i], err = NewVoter(randomString(nameLen, r), randomString(emailLen, r),
-			coin, voterHash, "email"); err != nil {
+			coin, voterHash, "email", 1); err != nil {
 			return nil, err
 		}
 
@@ -480,13 +480,13 @@ func TestCorruptedRetallyResults(t *testing.T) {
 
 	// Wrong number of questions.
 	fakeResults := [][]int64{{1, 2, 3, 4, 5}, {2, 3, 4, 5, 6}, {3, 4, 5, 6, 7}}
-	if b.Election.Retally(b.Votes, fakeResults, b.Trustees) {
+	if b.Election.Retally(b.Votes, fakeResults, b.Trustees, b.Voters) {
 		t.Fatal("The wrong results passed a retally")
 	}
 
 	// Wrong number of results.
 	fakeResults = [][]int64{{1, 2, 3, 4, 5}}
-	if b.Election.Retally(b.Votes, fakeResults, b.Trustees) {
+	if b.Election.Retally(b.Votes, fakeResults, b.Trustees, b.Voters) {
 		t.Fatal("The wrong results passed a retally")
 	}
 
@@ -872,7 +872,7 @@ func createFakeBundle(voterCount, ballotCount, auditCount, questionCount, answer
 	}
 
 	// Tally the election.
-	results, err := e.Tally(votes, trustees, trusteeSecrets)
+	results, err := e.Tally(votes, trustees, trusteeSecrets, voters)
 	if err != nil {
 		return nil, err
 	}
@@ -977,15 +977,15 @@ func TestNewElection(t *testing.T) {
 }
 
 func TestNewVoter(t *testing.T) {
-	if _, err := NewVoter("voter 1", "voter1@example.com", true, "", "email"); err != nil {
+	if _, err := NewVoter("voter 1", "voter1@example.com", true, "", "email", 1); err != nil {
 		t.Fatal("Couldn't create a voter:", err)
 	}
 
-	if _, err := NewVoter("voter 2", "voter2@example.com", false, "fake hash", "email"); err != nil {
+	if _, err := NewVoter("voter 2", "voter2@example.com", false, "fake hash", "email", 1); err != nil {
 		t.Fatal("Couldn't create a second voter:", err)
 	}
 
-	if _, err := NewVoter("voter 3", "voter3@example.com", true, "fake hash", "email"); err == nil {
+	if _, err := NewVoter("voter 3", "voter3@example.com", true, "fake hash", "email", 1); err == nil {
 		t.Fatal("Incorrectly created a voter with a computed and a supplied hash")
 	}
 }

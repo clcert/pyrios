@@ -444,11 +444,13 @@ type Ballot struct {
 // Ballot and checks the DisjunctiveZKProofs of the Answer values against the
 // Question.Min and Question.Max.
 func (vote *Ballot) Verify(election *Election) bool {
-	// TODO: Check this validation
-	//if election.ElectionHash != vote.ElectionHash {
-	//	glog.Error("The election hash in the vote did not match the election")
-	//	return false
-	//}
+	if election.ElectionHash != vote.ElectionHash {
+		legacyElectionHash := CalculateLegacyElectionHash(election.JSON)
+		if legacyElectionHash != vote.ElectionHash {
+			glog.Error("The election hash in the vote did not match the election")
+			return false
+		}
+	}
 
 	for i := range vote.Answers {
 		q := election.Questions[i]
@@ -730,6 +732,23 @@ func MarshalJSON(v interface{}) ([]byte, error) {
 	nullReplaced := emptyStringRegex.ReplaceAll(quoted, []byte(`null`))
 	serialized := maxMinRegex.ReplaceAll(nullReplaced, []byte(`"$1":$2`))
 	return serialized, err
+}
+
+// CalculateLegacyElectionHash TODO: Add description
+func CalculateLegacyElectionHash(electionJSON []byte) string {
+	aux := string(electionJSON)
+
+	var re = regexp.MustCompile(`"max_weight": \d, `)
+	aux = re.ReplaceAllString(aux, "")
+
+	re = regexp.MustCompile(`"normalization": (true|false), `)
+	aux = re.ReplaceAllString(aux, "")
+
+	h := sha256.Sum256([]byte(aux))
+	encodedHash := base64.StdEncoding.EncodeToString(h[:])
+	legacyElectionHash := encodedHash[:len(encodedHash)-1]
+
+	return legacyElectionHash
 }
 
 // FindVoterWeight TODO: Add description

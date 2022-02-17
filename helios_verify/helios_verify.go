@@ -35,7 +35,7 @@ func main() {
 	var password = flag.String("password", "", "Password used in admin panel. Required for private elections.")
 	flag.Parse()
 
-	if len(*electionUuid) == 0 {
+	if len(*electionUuid) == 0 && len(*bundleFile) == 0 {
 		fmt.Fprintln(os.Stderr, "Must provide an election uuid")
 		return
 	}

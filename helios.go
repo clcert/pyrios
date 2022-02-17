@@ -193,6 +193,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		i := i
 		go func(c chan bool) {
 			glog.Infof("Verifying vote from %s\n", votes[i].VoterUuid)
+			// glog.Infof("Voter: " + getVoterName(votes[i].VoterUuid, voters))
 			c <- votes[i].Vote.Verify(election)
 			return
 		}(resp)
@@ -223,6 +224,15 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 	}
 
 	return tallies, fingerprints
+}
+
+func getVoterName(uuid string, voters []*Voter) string {
+	for i := 0; i < len(voters); i++ {
+		if voters[i].Uuid == uuid {
+			return voters[i].Name
+		}
+	}
+	return ""
 }
 
 // Retally checks the proofs for a purported Election Result, given the partial

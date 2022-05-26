@@ -244,6 +244,10 @@ func getVoterName(uuid string, voters []*Voter) string {
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
 func (election *Election) Retally(votes []*CastBallot, result Result, trustees []*Trustee, voters []*Voter) bool {
+	indices := []*big.Int{}
+	for i := 0; i < (len(trustees)/2)+1; i++ {
+		indices = append(indices, big.NewInt(int64(trustees[i].TrusteeId)))
+	}
 	tallies, voteFingerprints := election.AccumulateTallies(votes, voters)
 	if len(voteFingerprints) == 0 {
 		glog.Error("Some votes didn't pass verification")
@@ -267,7 +271,9 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 
 		for j := range q.Answers {
 			decFactorCombination := big.NewInt(1)
-			for _, t := range trustees {
+			k := len(trustees) / 2
+			for b := 0; b < k+1; b++ {
+				t := trustees[b]
 				if !t.DecryptionProofs[i][j].VerifyPartialDecryption(
 					tallies[i][j],
 					t.DecryptionFactors[i][j],
@@ -278,7 +284,9 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 
 				// Combine this partial decryption using the
 				// homomorphism.
-				decFactorCombination.Mul(decFactorCombination, t.DecryptionFactors[i][j])
+				aux0 := Lagrange(indices, big.NewInt(int64(b+1)), election.PublicKey.ExponentPrime)
+				aux1 := new(big.Int).Exp(t.DecryptionFactors[i][j], aux0, election.PublicKey.Prime)
+				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
 
 			// Contrary to how it's written in the published spec,
@@ -507,11 +515,11 @@ type Result [][]int64
 type Trustee struct {
 	// DecryptionFactors are the partial decryptions of each of the
 	// homomorphic tally results.
-	DecryptionFactors [][]*big.Int `json:"decryption_factors"`
+	DecryptionFactors [][]*big.Int `json:"answers_decryption_factors"`
 
 	// DecryptionProofs are the proofs of correct partial decryption for
 	// each of the DecryptionFactors.
-	DecryptionProofs [][]*ZKProof `json:"decryption_proofs"`
+	DecryptionProofs [][]*ZKProof `json:"answers_decryption_proofs"`
 
 	// PoK is a proof of knowledge of the private key share held by this
 	// Trustee and used to create the DecryptionFactors.
@@ -526,6 +534,9 @@ type Trustee struct {
 
 	// Uuid is the unique identifier for this Trustee.
 	Uuid string `json:"uuid"`
+
+	// TrusteeId
+	TrusteeId int `json:"trustee_id"`
 }
 
 // A LabeledEntry is an answer associated with a result count field.
@@ -769,4 +780,18 @@ func FindVoterWeight(voterUuid string, voters []*Voter) *big.Int {
 		}
 	}
 	return big.NewInt(0)
+}
+
+func Lagrange(indices []*big.Int, index *big.Int, modulus *big.Int) *big.Int {
+	result := big.NewInt(1)
+	for _, idx := range indices {
+		if idx.Cmp(index) == 0 {
+			continue
+		}
+		aux0 := new(big.Int).Sub(idx, index)
+		aux1 := new(big.Int).ModInverse(aux0, modulus)
+		aux2 := new(big.Int).Mul(idx, aux1)
+		result.Mul(result, aux2)
+	}
+	return result
 }

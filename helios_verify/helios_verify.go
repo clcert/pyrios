@@ -26,7 +26,7 @@ import (
 
 func main() {
 	var electionUuid = flag.String("uuid", "", "The uuid of the election to download")
-	var heliosServer = flag.String("server", "https://participa.uchile.cl/vota/", "The server to download the election from")
+	var heliosServer = flag.String("server", "https://participauchile.cl/vota/", "The server to download the election from")
 	var bundleFile = flag.String("bundle", "", "The file to write the bundle into")
 	var download = flag.Bool("download", true, "Whether or not to download the bundle")
 	var verify = flag.Bool("verify", false, "Whether or not to verify the downloaded bundle")

@@ -279,7 +279,7 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 					t.DecryptionFactors[i][j],
 					t.PublicKey) {
 					glog.Errorf("The partial decryption proof for %d, %d failed\n", i, j)
-					return false
+					continue
 				}
 
 				validTrustees += 1

@@ -272,8 +272,8 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 		for j := range q.Answers {
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
-			for b := 0; b < k+1; b++ {
-				t := trustees[b]
+			validTrustees := 0
+			for _, t := range trustees {
 				if !t.DecryptionProofs[i][j].VerifyPartialDecryption(
 					tallies[i][j],
 					t.DecryptionFactors[i][j],
@@ -282,11 +282,20 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 					return false
 				}
 
+				validTrustees += 1
 				// Combine this partial decryption using the
 				// homomorphism.
-				aux0 := Lagrange(indices, big.NewInt(int64(b+1)), election.PublicKey.ExponentPrime)
+				aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
 				aux1 := new(big.Int).Exp(t.DecryptionFactors[i][j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
+
+				if validTrustees == (k + 1) {
+					break
+				}
+			}
+			if validTrustees < (k + 1) {
+				glog.Errorf("Not enough valid trustees\n")
+				return false
 			}
 
 			// Contrary to how it's written in the published spec,

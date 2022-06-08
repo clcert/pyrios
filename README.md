@@ -12,12 +12,18 @@ papeletas secretas y permitir la verificación pública: cualquier persona
 puede comprobar que los resultados de una elección fueron calculados de 
 manera correcta.
 
-## Instalación de Pyrios-UChile
+## Descargar compilado
 
-### Requisitos
+Ir a "Releases" en la barra lateral y bajar la última versión ejecutable existente para tu arquitectura y sistema operativo.
 
+## Cómo Compilar
 
+Si lo deseas, puedes compilar el programa usando el código fuente del repositorio.
 
+1. [Instalar Go](https://go.dev/doc/install)
+1. instalar el comando `git`, o descargar y descomprimir el código fuente listado en "Releases" a mano.
+    1. Si usas el comando `git`, clona el repositorio con `git clone https://github.com/clcert/pyrios`.
+1. En la carpeta del código fuente, ejecutar `go build`
 
 Verificación de Elección
 ---------------------
@@ -28,4 +34,4 @@ https://participa.uchile.cl/elecciones
 
 Luego de eso, debes correr el siguiente comando:
 
-    helios_verify -bundle=<bundle_filename> -download=false -write=false -verify -logtostderr
+    pyrios -bundle=<bundle_filename> -download=false -write=false -verify -logtostderr

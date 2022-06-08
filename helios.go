@@ -20,7 +20,7 @@
 //
 // The types in the helios package are translations of the JSON Helios types
 // given by the Helios v3 specification.
-package pyrios
+package main
 
 import (
 	"crypto/sha256"

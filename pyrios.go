@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-
-	"github.com/clcert/pyrios"
 )
 
 func main() {
@@ -45,11 +43,11 @@ func main() {
 		return
 	}
 
-	var b *pyrios.ElectionBundle
+	var b *ElectionBundle
 	var err error
 	if *download {
 		fmt.Println("Downloading election information and ballots. This might take a long time.")
-		b, err = pyrios.Download(*heliosServer, *electionUuid, *username, *password)
+		b, err = Download(*heliosServer, *electionUuid, *username, *password)
 		if err != nil {
 			panic(err)
 		}
@@ -72,8 +70,8 @@ func main() {
 			panic(err)
 		}
 
-		b = new(pyrios.ElectionBundle)
-		err = pyrios.UnmarshalJSON(serialized, b)
+		b = new(ElectionBundle)
+		err = UnmarshalJSON(serialized, b)
 		if err != nil {
 			panic(err)
 		}

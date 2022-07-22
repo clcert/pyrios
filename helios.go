@@ -244,10 +244,6 @@ func getVoterName(uuid string, voters []*Voter) string {
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
 func (election *Election) Retally(votes []*CastBallot, result Result, trustees []*Trustee, voters []*Voter) bool {
-	indices := []*big.Int{}
-	for i := 0; i < (len(trustees)/2)+1; i++ {
-		indices = append(indices, big.NewInt(int64(trustees[i].TrusteeId)))
-	}
 	tallies, voteFingerprints := election.AccumulateTallies(votes, voters)
 	if len(voteFingerprints) == 0 {
 		glog.Error("Some votes didn't pass verification")
@@ -270,32 +266,37 @@ func (election *Election) Retally(votes []*CastBallot, result Result, trustees [
 		}
 
 		for j := range q.Answers {
+			var indices []*big.Int
+			var validTrusteesList []*Trustee
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
-			validTrustees := 0
 			for _, t := range trustees {
-				if !t.DecryptionProofs[i][j].VerifyPartialDecryption(
+				if t.DecryptionProofs == nil || !t.DecryptionProofs[i][j].VerifyPartialDecryption(
 					tallies[i][j],
 					t.DecryptionFactors[i][j],
 					t.PublicKey) {
-					glog.Errorf("The partial decryption proof for %d, %d failed\n", i, j)
+					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
 					continue
 				}
 
-				validTrustees += 1
+				indices = append(indices, big.NewInt(int64(t.TrusteeId)))
+				validTrusteesList = append(validTrusteesList, t)
+
+				if len(validTrusteesList) == (k + 1) {
+					break
+				}
+			}
+			if len(validTrusteesList) < (k + 1) {
+				glog.Errorf("Not enough valid trustees\n")
+				return false
+			}
+
+			for _, t := range validTrusteesList {
 				// Combine this partial decryption using the
 				// homomorphism.
 				aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
 				aux1 := new(big.Int).Exp(t.DecryptionFactors[i][j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
-
-				if validTrustees == (k + 1) {
-					break
-				}
-			}
-			if validTrustees < (k + 1) {
-				glog.Errorf("Not enough valid trustees\n")
-				return false
 			}
 
 			// Contrary to how it's written in the published spec,

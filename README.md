@@ -34,4 +34,4 @@ https://participa.uchile.cl/elecciones
 
 Luego de eso, debes correr el siguiente comando:
 
-    pyrios -bundle=<bundle_filename> -download=false -write=false -verify -logtostderr
+    pyrios -bundle=<bundle_filename> -download=false -write=false -verify

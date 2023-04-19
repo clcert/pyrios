@@ -41,7 +41,7 @@ type ElectionBundle struct {
 	Election *Election     `json:"-"`
 	Voters   []*Voter      `json:"-"`
 	Votes    []*CastBallot `json:"-"`
-	Results  Result        `json:"-"`
+	Results  []*Result     `json:"-"`
 	Trustees []*Trustee    `json:"-"`
 }
 

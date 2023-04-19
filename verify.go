@@ -43,10 +43,10 @@ type SchnorrProof struct {
 // by sending an instance of a Commit.
 type Commit struct {
 	// A is the first part of a commitment: A = g^w mod p.
-	A *big.Int `json:"a"`
+	A *big.Int `json:"A"` // OK
 
 	// B is the second part of a commitment: B = y^w mod p.
-	B *big.Int `json:"b"`
+	B *big.Int `json:"B"` // OK
 }
 
 // Verify checks a SchnorrProof to make sure it's valid.
@@ -89,9 +89,9 @@ func (pok *SchnorrProof) Verify(publicKey *Key) bool {
 // wouldn't be able to successfully prove anything else against a random
 // challenge value.
 type ZKProof struct {
-	Challenge  *big.Int `json:"challenge"`
-	Commitment *Commit  `json:"commitment"`
-	Response   *big.Int `json:"response"`
+	Challenge  *big.Int `json:"challenge"`  // OK
+	Commitment *Commit  `json:"commitment"` // OK
+	Response   *big.Int `json:"response"`   // OK
 }
 
 // Verify checks the Chaum-Pedersen zero-knowledge proof for the
@@ -242,4 +242,42 @@ func (zkproof DisjunctiveZKProof) Verify(min int, max int, ciphertext *Ciphertex
 	}
 
 	return true
+}
+
+type Decryption struct {
+	// TallyType
+	TallyType string `json:"tally_type"` // OK
+
+	// DecryptionFactors
+	DecryptionFactors []*big.Int `json:"decryption_factors"` // OK
+
+	// DecryptionProofs
+	DecryptionProofs []*ZKProof `json:"decryption_proofs"` // OK
+}
+
+type Certificate struct {
+	// SignatureKey
+	SignatureKey *big.Int `json:"decryption_factors"` // OK
+
+	// EncryptionKey
+	EncryptionKey *big.Int `json:"encryption_key"` // OK
+
+	// Signature
+	Signature *Signature `json:"signature"`
+}
+
+type Signature struct {
+	// Challenge
+	Challenge *big.Int `json:"challenge"`
+
+	// Response
+	Response *big.Int `json:"response"`
+}
+
+type Coefficient struct {
+	// Coefficient
+	CoefficientValue *big.Int `json:"coefficient"`
+
+	// Signature
+	Signature *Signature `json:"signature"`
 }

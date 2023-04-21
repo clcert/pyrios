@@ -258,7 +258,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 
 	glog.Info("Checking the final tally")
 	for i, q := range election.Questions {
-		if len(result) != len(q.ClosedOptions) {
+		if len(result[i].Results) != len(q.ClosedOptions) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
 		}
@@ -271,7 +271,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 			for _, t := range trustees {
 				if t.Decryptions[i].DecryptionProofs == nil || !t.Decryptions[i].DecryptionProofs[j].VerifyPartialDecryption(
 					tallies[i][j],
-					t.Decryptions[i].DecryptionFactors[i],
+					t.Decryptions[i].DecryptionFactors[j],
 					t.PublicKey) {
 					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
 					continue

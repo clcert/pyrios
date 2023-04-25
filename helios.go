@@ -258,7 +258,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 
 	glog.Info("Checking the final tally")
 	for i, q := range election.Questions {
-		if len(result[i].Results) != len(q.ClosedOptions) {
+		if len(result[i].AnswerResults) != len(q.ClosedOptions) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
 		}
@@ -300,7 +300,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 			// Contrary to how it's written in the published spec,
 			// the result must be represented as g^m rather than m,
 			// since everything is done in exponential ElGamal.
-			bigResult := big.NewInt(result[i].Results[j])
+			bigResult := big.NewInt(result[i].AnswerResults[j])
 			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
 			// (decFactorCombination * bigResult) mod p
 			lhs := new(big.Int).Mul(decFactorCombination, bigResult)
@@ -527,7 +527,7 @@ type Result struct {
 	TallyType string `json:"tally_type"`
 
 	// Result
-	Results []int64 `json:"results"`
+	AnswerResults []int64 `json:"ans_results"`
 }
 
 // A Trustee represents the public information for one of the keys used to
@@ -608,7 +608,7 @@ func (election *Election) LabelResults(results []*Result) LabeledResult {
 		q := election.Questions[i]
 		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.ClosedOptions))}
 		for j := range q.ClosedOptions {
-			labeledRes[i].Answers[j] = LabeledEntry{q.ClosedOptions[j], float64(r.Results[j]) / maxWeight}
+			labeledRes[i].Answers[j] = LabeledEntry{q.ClosedOptions[j], float64(r.AnswerResults[j]) / maxWeight}
 		}
 
 	}

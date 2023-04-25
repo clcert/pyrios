@@ -35,13 +35,13 @@ type ElectionBundle struct {
 	ElectionData []byte   `json:"election"`
 	VotersData   [][]byte `json:"voters"`
 	VotesData    [][]byte `json:"votes"`
-	ResultsData  []byte   `json:"results"`
+	ResultData   []byte   `json:"result"`
 	TrusteesData []byte   `json:"trustees"`
 
 	Election *Election     `json:"-"`
 	Voters   []*Voter      `json:"-"`
 	Votes    []*CastBallot `json:"-"`
-	Results  []*Result     `json:"-"`
+	Result   []*Result     `json:"-"`
 	Trustees []*Trustee    `json:"-"`
 }
 
@@ -70,15 +70,18 @@ func (b *ElectionBundle) Instantiate() error {
 	glog.Infof("There are %d voters in this election\n", len(b.Voters))
 
 	for i, jsonData := range b.VotesData {
-		var vote *CastBallot
-		err = UnmarshalJSON(jsonData, &vote)
+		// var vote *CastBallot
+		var tempVote []*CastBallot
+		// err = UnmarshalJSON(jsonData, &vote)
+		err = UnmarshalJSON(jsonData, &tempVote)
 		if err != nil {
-			glog.Error("Couldn't unmarshal voter ", i)
+			glog.Error("Couldn't unmarshal vote from voter ", i)
 			return err
 		}
 
-		vote.JSON = jsonData
-		b.Votes = append(b.Votes, vote)
+		// vote.JSON = jsonData
+		// b.Votes = append(b.Votes, vote)
+		b.Votes = append(b.Votes, tempVote...)
 	}
 
 	glog.Infof("Collected %d cast ballots for the retally\n", len(b.Votes))
@@ -89,7 +92,7 @@ func (b *ElectionBundle) Instantiate() error {
 		return err
 	}
 
-	if err = UnmarshalJSON(b.ResultsData, &b.Results); err != nil {
+	if err = UnmarshalJSON(b.ResultData, &b.Result); err != nil {
 		glog.Info("Couldn't unmarshal the result of the election")
 	}
 
@@ -179,7 +182,7 @@ func Download(server string, uuid string, username, password string) (*ElectionB
 		return nil, err
 	}
 
-	if b.ResultsData, err = GetJSON(elecAddr+"/result", &b.Results, client); err != nil {
+	if b.ResultData, err = GetJSON(elecAddr+"/result", &b.Result, client); err != nil {
 		glog.Info("Couldn't get the result of the election: ", err)
 		// Let the result be null if we can't get it. Helios will warn
 		// about this later.
@@ -190,7 +193,7 @@ func Download(server string, uuid string, username, password string) (*ElectionB
 
 // Verify checks that the given election bundle passes retally verification.
 func (b *ElectionBundle) Verify() bool {
-	return b.Election.Retally(b.Votes, b.Results, b.Trustees, b.Voters)
+	return b.Election.Retally(b.Votes, b.Result, b.Trustees, b.Voters)
 }
 
 func getLoggedInClient(server, username, password string) (*http.Client, error) {

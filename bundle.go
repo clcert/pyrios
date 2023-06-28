@@ -32,16 +32,16 @@ import (
 // election they want to verify. The values are kept as uninterpreted bytes to
 // make sure they don't do round trips through other JSON interpreters.
 type ElectionBundle struct {
-	ElectionData []byte   `json:"election"`
-	VotersData   [][]byte `json:"voters"`
-	VotesData    [][]byte `json:"votes"`
-	ResultsData  []byte   `json:"results"`
-	TrusteesData []byte   `json:"trustees"`
+	ElectionData []byte `json:"election"`
+	VotersData   []byte `json:"voters"`
+	VotesData    []byte `json:"votes"`
+	ResultData   []byte `json:"result"`
+	TrusteesData []byte `json:"trustees"`
 
 	Election *Election     `json:"-"`
 	Voters   []*Voter      `json:"-"`
 	Votes    []*CastBallot `json:"-"`
-	Results  Result        `json:"-"`
+	Result   []*Result     `json:"-"`
 	Trustees []*Trustee    `json:"-"`
 }
 
@@ -56,31 +56,41 @@ func (b *ElectionBundle) Instantiate() error {
 
 	b.Election.Init(b.ElectionData)
 
-	for i, jsonData := range b.VotersData {
-		var tempVoters []*Voter
-		err = UnmarshalJSON(jsonData, &tempVoters)
-		if err != nil {
-			glog.Errorf("Couldn't unmarshal the voter information for set %d\n", i)
-			return err
-		}
+	//for i, jsonData := range b.VotersData {
+	//	var tempVoters []*Voter
+	//	err = UnmarshalJSON(jsonData, &tempVoters)
+	//	if err != nil {
+	//		glog.Errorf("Couldn't unmarshal the voter information for set %d\n", i)
+	//		return err
+	//	}
+	//
+	//	b.Voters = append(b.Voters, tempVoters...)
+	//}
 
-		b.Voters = append(b.Voters, tempVoters...)
+	if err = UnmarshalJSON(b.VotersData, &b.Voters); err != nil {
+		glog.Error("Couldn't unmarshal the voters")
+		return err
 	}
-
 	glog.Infof("There are %d voters in this election\n", len(b.Voters))
 
-	for i, jsonData := range b.VotesData {
-		var vote *CastBallot
-		err = UnmarshalJSON(jsonData, &vote)
-		if err != nil {
-			glog.Error("Couldn't unmarshal voter ", i)
-			return err
-		}
+	//for i, jsonData := range b.VotesData {
+	//	// var vote *CastBallot
+	//	var tempVote []*CastBallot
+	//	// err = UnmarshalJSON(jsonData, &vote)
+	//	err = UnmarshalJSON(jsonData, &tempVote)
+	//	if err != nil {
+	//		glog.Error("Couldn't unmarshal vote from voter ", i)
+	//		return err
+	//	}
+	//
+	//	// vote.JSON = jsonData
+	//	// b.Votes = append(b.Votes, vote)
+	//	b.Votes = append(b.Votes, tempVote...)
+	//}
 
-		vote.JSON = jsonData
-		b.Votes = append(b.Votes, vote)
+	if err = UnmarshalJSON(b.VotesData, &b.Votes); err != nil {
+		glog.Error("Couldn't unmarshal the votes")
 	}
-
 	glog.Infof("Collected %d cast ballots for the retally\n", len(b.Votes))
 
 	// The trustee information is a list of Trustees.
@@ -89,7 +99,7 @@ func (b *ElectionBundle) Instantiate() error {
 		return err
 	}
 
-	if err = UnmarshalJSON(b.ResultsData, &b.Results); err != nil {
+	if err = UnmarshalJSON(b.ResultData, &b.Result); err != nil {
 		glog.Info("Couldn't unmarshal the result of the election")
 	}
 
@@ -100,97 +110,100 @@ func (b *ElectionBundle) Instantiate() error {
 // election uuid. Username and password are required to login to Helios server
 // if the election is private.
 func Download(server string, uuid string, username, password string) (*ElectionBundle, error) {
-	elecAddr := server + "app/elections/" + uuid
-	b := new(ElectionBundle)
-
-	client := http.DefaultClient
 	var err error
-	if username != "" && password != "" {
-		client, err = getLoggedInClient(server, username, password)
-		if err != nil {
-			glog.Error("Couldn't log in: ", err)
-			return nil, err
-		}
-	}
-
-	if b.ElectionData, err = GetJSON(elecAddr, &b.Election, client); err != nil {
-		glog.Error("Couldn't get the election data: ", err)
-		return nil, err
-	}
-
-	b.Election.Init(b.ElectionData)
-
-	// The helios server times out if it tries to return too many voters at
-	// once.  This can be a problem for large elections (like the annual
-	// IACR elections).  So, it provides a limit parameter and an after
-	// parameter. The limit parameter specifies the maximum number of
-	// voters to return, and the after parameter
-	// specifies the last received voter.
-	after := ""
-	for {
-		var tempVoters []*Voter
-		var votersJSON []byte
-		// Helios accepts "after=" as specifying the beginning of the
-		// list.
-		addr := elecAddr + "/voters/?after=" + after + "&limit=100"
-		votersJSON, err = GetJSON(addr, &tempVoters, client)
-		if err != nil {
-			glog.Error("Couldn't get the voter information")
-			return nil, err
-		}
-
-		// Helios returns an empty array when there are no more voters.
-		if len(tempVoters) == 0 {
-			break
-		}
-
-		b.Voters = append(b.Voters, tempVoters...)
-		b.VotersData = append(b.VotersData, votersJSON)
-
-		after = tempVoters[len(tempVoters)-1].Uuid
-		glog.Info("Got ", len(tempVoters), " voters")
-	}
-
-	glog.Infof("There are %d voters in this election\n", len(b.Voters))
-
-	for _, v := range b.Voters {
-		glog.Info("Getting voter ", v.Uuid)
-		var vote *CastBallot
-		jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", &vote, client)
-		if err != nil {
-			glog.Errorf("Couldn't get the last ballot cast by %s\n", v.Uuid)
-		}
-
-		// Skip ballots that weren't ever cast.
-		if len(vote.CastAt) == 0 {
-			continue
-		}
-
-		vote.JSON = jsonData
-		b.Votes = append(b.Votes, vote)
-		b.VotesData = append(b.VotesData, jsonData)
-	}
-
-	glog.Info("Collected ", len(b.Votes), " cast ballots for the retally")
-
-	// The trustee information is a list of Trustees.
-	if b.TrusteesData, err = GetJSON(elecAddr+"/trustees/", &b.Trustees, client); err != nil {
-		glog.Error("Couldn't get the list of trustees: ", err)
-		return nil, err
-	}
-
-	if b.ResultsData, err = GetJSON(elecAddr+"/result", &b.Results, client); err != nil {
-		glog.Info("Couldn't get the result of the election: ", err)
-		// Let the result be null if we can't get it. Helios will warn
-		// about this later.
-	}
-
-	return b, nil
+	b := new(ElectionBundle)
+	return b, err
+	//elecAddr := server + "app/elections/" + uuid
+	//b := new(ElectionBundle)
+	//
+	//client := http.DefaultClient
+	//var err error
+	//if username != "" && password != "" {
+	//	client, err = getLoggedInClient(server, username, password)
+	//	if err != nil {
+	//		glog.Error("Couldn't log in: ", err)
+	//		return nil, err
+	//	}
+	//}
+	//
+	//if b.ElectionData, err = GetJSON(elecAddr, &b.Election, client); err != nil {
+	//	glog.Error("Couldn't get the election data: ", err)
+	//	return nil, err
+	//}
+	//
+	//b.Election.Init(b.ElectionData)
+	//
+	//// The helios server times out if it tries to return too many voters at
+	//// once.  This can be a problem for large elections (like the annual
+	//// IACR elections).  So, it provides a limit parameter and an after
+	//// parameter. The limit parameter specifies the maximum number of
+	//// voters to return, and the after parameter
+	//// specifies the last received voter.
+	//after := ""
+	//for {
+	//	var tempVoters []*Voter
+	//	var votersJSON []byte
+	//	// Helios accepts "after=" as specifying the beginning of the
+	//	// list.
+	//	addr := elecAddr + "/voters/?after=" + after + "&limit=100"
+	//	votersJSON, err = GetJSON(addr, &tempVoters, client)
+	//	if err != nil {
+	//		glog.Error("Couldn't get the voter information")
+	//		return nil, err
+	//	}
+	//
+	//	// Helios returns an empty array when there are no more voters.
+	//	if len(tempVoters) == 0 {
+	//		break
+	//	}
+	//
+	//	b.Voters = append(b.Voters, tempVoters...)
+	//	b.VotersData = append(b.VotersData, votersJSON)
+	//
+	//	after = tempVoters[len(tempVoters)-1].Uuid
+	//	glog.Info("Got ", len(tempVoters), " voters")
+	//}
+	//
+	//glog.Infof("There are %d voters in this election\n", len(b.Voters))
+	//
+	//for _, v := range b.Voters {
+	//	glog.Info("Getting voter ", v.Uuid)
+	//	var vote *CastBallot
+	//	jsonData, err := GetJSON(elecAddr+"/ballots/"+v.Uuid+"/last", &vote, client)
+	//	if err != nil {
+	//		glog.Errorf("Couldn't get the last ballot cast by %s\n", v.Uuid)
+	//	}
+	//
+	//	// Skip ballots that weren't ever cast.
+	//	if len(vote.CastAt) == 0 {
+	//		continue
+	//	}
+	//
+	//	vote.JSON = jsonData
+	//	b.Votes = append(b.Votes, vote)
+	//	b.VotesData = append(b.VotesData, jsonData)
+	//}
+	//
+	//glog.Info("Collected ", len(b.Votes), " cast ballots for the retally")
+	//
+	//// The trustee information is a list of Trustees.
+	//if b.TrusteesData, err = GetJSON(elecAddr+"/trustees/", &b.Trustees, client); err != nil {
+	//	glog.Error("Couldn't get the list of trustees: ", err)
+	//	return nil, err
+	//}
+	//
+	//if b.ResultData, err = GetJSON(elecAddr+"/result", &b.Result, client); err != nil {
+	//	glog.Info("Couldn't get the result of the election: ", err)
+	//	// Let the result be null if we can't get it. Helios will warn
+	//	// about this later.
+	//}
+	//
+	//return b, nil
 }
 
 // Verify checks that the given election bundle passes retally verification.
 func (b *ElectionBundle) Verify() bool {
-	return b.Election.Retally(b.Votes, b.Results, b.Trustees, b.Voters)
+	return b.Election.Retally(b.Votes, b.Result, b.Trustees, b.Voters)
 }
 
 func getLoggedInClient(server, username, password string) (*http.Client, error) {

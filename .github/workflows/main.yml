@@ -14,19 +14,11 @@ jobs:
           - goos: windows          
             goarch: arm64
     steps:
-    - name: Get Release Info
-      run: |
-        {
-          echo "OS_NAME=${{ matrix.goos }}"
-        } >> "$GITHUB_ENV"
-    - name: OS darwin
-      if: matrix.goos == 'darwin'
-      run: echo "OS_NAME=macOS" >> "$GITHUB_ENV"
     - uses: actions/checkout@v3
     - uses: wangyoucao577/go-release-action@v1.38
       with:
         github_token: ${{ secrets.PYRIOS_TOKEN }}
         goos: ${{ matrix.goos }}
         goarch: ${{ matrix.goarch }}
-        md5sum: false
-        asset_name: '${BINARY_NAME}-${RELEASE_TAG}-${{ env.OS_NAME }}-${{ matrix.goarch }}'
+        md5sum: FALSE
+        

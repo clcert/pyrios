@@ -190,8 +190,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		// Shadow i as a new variable for the goroutine.
 		i := i
 		go func(c chan bool) {
-			glog.Infof("Verifying vote from %s\n", votes[i].VoterUuid)
-			// glog.Infof("Voter: " + getVoterName(votes[i].VoterUuid, voters))
+			glog.Infof("Verifying vote from %s\n", FindVoterUuid(votes[i].VoterUuid, voters))
 			c <- votes[i].Vote.Verify(election)
 			return
 		}(resp)
@@ -224,15 +223,6 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 	return tallies, fingerprints
 }
 
-func getVoterName(uuid string, voters []*Voter) string {
-	for i := 0; i < len(voters); i++ {
-		if voters[i].Uuid == uuid {
-			return voters[i].Name
-		}
-	}
-	return ""
-}
-
 // Retally checks the proofs for a purported Election Result, given the partial
 // decryption proofs from the Trustee data, and given a list of CastBallot
 // values that were used in the tally. It recomputes the encrypted tally value
@@ -241,7 +231,7 @@ func getVoterName(uuid string, voters []*Voter) string {
 // tally computation. It then checks the purported tally value in the Result by
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
-func (election *Election) Retally(votes []*CastBallot, result []*Result, trustees []*Trustee, voters []*Voter) bool {
+func (election *Election) Retally(votes []*CastBallot, result ElectionResult, trustees []*Trustee, voters []*Voter) bool {
 	tallies, voteFingerprints := election.AccumulateTallies(votes, voters)
 	if len(voteFingerprints) == 0 {
 		glog.Error("Some votes didn't pass verification")
@@ -250,7 +240,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 
 	glog.Info("All cast ballots pass verification")
 
-	if len(result) != len(election.Questions) {
+	if len(result.ResultsTotal) != len(election.Questions) {
 		glog.Error("The results do not contain the right number of answers")
 		glog.Error("Maybe the election hasn't closed yet?")
 		return false
@@ -258,7 +248,7 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 
 	glog.Info("Checking the final tally")
 	for i, q := range election.Questions {
-		if len(result[i].AnswerResults) != len(q.ClosedOptions) {
+		if len(result.ResultsTotal[i].AnswerResults) != len(q.ClosedOptions) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
 		}
@@ -269,9 +259,9 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
 			for _, t := range trustees {
-				if t.Decryptions[i].DecryptionProofs == nil || !t.Decryptions[i].DecryptionProofs[j].VerifyPartialDecryption(
+				if t.Decryptions[0].Decryptions[i].DecryptionProofs == nil || !t.Decryptions[0].Decryptions[i].DecryptionProofs[j].VerifyPartialDecryption(
 					tallies[i][j],
-					t.Decryptions[i].DecryptionFactors[j],
+					t.Decryptions[0].Decryptions[i].DecryptionFactors[j],
 					t.PublicKey) {
 					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
 					continue
@@ -293,14 +283,14 @@ func (election *Election) Retally(votes []*CastBallot, result []*Result, trustee
 				// Combine this partial decryption using the
 				// homomorphism.
 				aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
-				aux1 := new(big.Int).Exp(t.Decryptions[i].DecryptionFactors[j], aux0, election.PublicKey.Prime)
+				aux1 := new(big.Int).Exp(t.Decryptions[0].Decryptions[i].DecryptionFactors[j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
 
 			// Contrary to how it's written in the published spec,
 			// the result must be represented as g^m rather than m,
 			// since everything is done in exponential ElGamal.
-			bigResult := big.NewInt(result[i].AnswerResults[j])
+			bigResult := big.NewInt(result.ResultsTotal[i].AnswerResults[j])
 			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
 			// (decFactorCombination * bigResult) mod p
 			lhs := new(big.Int).Mul(decFactorCombination, bigResult)
@@ -519,9 +509,24 @@ type CastBallot struct {
 	VoterUuid string `json:"voter_uuid"`
 }
 
-// A Result is a list of tally lists, one tally list per Question. Each tally
-// list consists of one integer per choice in the Question.
-// type Result [][]int64
+type ElectionResult struct {
+	ResultsTotal   []ResultTotal   `json:"results_total"`
+	ResultsGrouped []ResultGrouped `json:"results_grouped"`
+}
+
+type ResultTotal struct {
+	// AnswerResults
+	AnswerResults []int64 `json:"ans_results"`
+}
+
+type ResultGrouped struct {
+	// Group
+	Group string `json:"group"`
+
+	// Result
+	Result []Result `json:"result"`
+}
+
 type Result struct {
 	// TallyType
 	TallyType string `json:"tally_type"`
@@ -546,7 +551,7 @@ type Trustee struct {
 	// PoK *SchnorrProof `json:"pok"` // TODO: Review
 
 	// Decryptions
-	Decryptions []*Decryption `json:"decryptions"` // OK
+	Decryptions []*GroupDecryption `json:"decryptions"` // OK
 
 	// Certificate
 	Certificate *Certificate `json:"certificate"` // OK
@@ -598,7 +603,7 @@ type LabeledResult []LabeledQuestion
 
 // LabelResults matches up the string questions and answers from an election
 // with the results provided by a tally.
-func (election *Election) LabelResults(results []*Result) LabeledResult {
+func (election *Election) LabelResults(results []ResultTotal) LabeledResult {
 	maxWeight := float64(1)
 	if election.Normalization {
 		maxWeight = float64(election.MaxWeight)
@@ -617,13 +622,17 @@ func (election *Election) LabelResults(results []*Result) LabeledResult {
 }
 
 // String creates a printable representation of a LabeledResult.
-func (labeledResults LabeledResult) String() string {
+func (labeledResults LabeledResult) toString(normalization bool) string {
 	result := ""
 	for i := range labeledResults {
 		result += labeledResults[i].Question + "\n"
 		ans := labeledResults[i].Answers
 		for j := range ans {
-			result += fmt.Sprintf("\t%s: %.3f\n", ans[j].Answer, ans[j].Count)
+			if normalization {
+				result += fmt.Sprintf("\t%s: %.3f votos\n", ans[j].Answer, ans[j].Count)
+			} else {
+				result += fmt.Sprintf("\t%s: %.0f votos\n", ans[j].Answer, ans[j].Count)
+			}
 		}
 	}
 
@@ -821,6 +830,36 @@ func FindVoterWeight(voterUuid string, voters []*Voter) *big.Int {
 		}
 	}
 	return big.NewInt(0)
+}
+
+// FindVoterName
+func FindVoterName(voterUuid string, voters []*Voter) string {
+	for _, voter := range voters {
+		if voter.Uuid == voterUuid {
+			return voter.Name
+		}
+	}
+	return ""
+}
+
+// FindVoterLoginID
+func FindVoterLoginId(voterUuid string, voters []*Voter) string {
+	for _, voter := range voters {
+		if voter.Uuid == voterUuid {
+			return voter.VoterID
+		}
+	}
+	return ""
+}
+
+// FindVoterUuid
+func FindVoterUuid(voterUuid string, voters []*Voter) string {
+	for _, voter := range voters {
+		if voter.Uuid == voterUuid {
+			return voter.Uuid
+		}
+	}
+	return ""
 }
 
 func Lagrange(indices []*big.Int, index *big.Int, modulus *big.Int) *big.Int {

@@ -88,10 +88,10 @@ func main() {
 			fmt.Println("The election passes verification")
 
 			fmt.Println("The results are as follows:")
-			lr := b.Election.LabelResults(b.Result)
-			fmt.Printf("%s", lr)
+			lr := b.Election.LabelResults(b.Result.ResultsTotal)
+			fmt.Printf("%s", lr.toString(b.Election.Normalization))
 		} else {
-			if b.Result == nil {
+			if b.Result.ResultsTotal == nil {
 				fmt.Fprintln(os.Stderr, "The election has not yet published results")
 			} else {
 				fmt.Fprintln(os.Stderr, "The election fails verification")

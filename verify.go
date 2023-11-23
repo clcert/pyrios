@@ -244,6 +244,11 @@ func (zkproof DisjunctiveZKProof) Verify(min int, max int, ciphertext *Ciphertex
 	return true
 }
 
+type GroupDecryption struct {
+	Group       string       `json:"group"`
+	Decryptions []Decryption `json:"decryptions"`
+}
+
 type Decryption struct {
 	// TallyType
 	TallyType string `json:"tally_type"` // OK

@@ -38,11 +38,11 @@ type ElectionBundle struct {
 	ResultData   []byte `json:"result"`
 	TrusteesData []byte `json:"trustees"`
 
-	Election *Election     `json:"-"`
-	Voters   []*Voter      `json:"-"`
-	Votes    []*CastBallot `json:"-"`
-	Result   []*Result     `json:"-"`
-	Trustees []*Trustee    `json:"-"`
+	Election *Election      `json:"-"`
+	Voters   []*Voter       `json:"-"`
+	Votes    []*CastBallot  `json:"-"`
+	Result   ElectionResult `json:"-"`
+	Trustees []*Trustee     `json:"-"`
 }
 
 // Instantiate deserializes the serialized election data structures (the *Data

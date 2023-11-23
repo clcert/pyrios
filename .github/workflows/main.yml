@@ -15,7 +15,7 @@ jobs:
             goarch: arm64
     steps:
     - uses: actions/checkout@v3
-    - uses: wangyoucao577/go-release-action@v1.38
+    - uses: wangyoucao577/go-release-action@v1
       with:
         github_token: ${{ secrets.PYRIOS_TOKEN }}
         goos: ${{ matrix.goos }}

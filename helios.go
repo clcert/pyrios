@@ -27,11 +27,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/golang/glog"
 	"io/ioutil"
 	"math/big"
 	"net/http"
 	"regexp"
+
+	"github.com/golang/glog"
 )
 
 // A Question is part of an Election and specifies a question to be voted on.
@@ -41,7 +42,7 @@ type Question struct {
 	// AnswerUrls []string `json:"answer_urls"`
 
 	// ClosedOptions is the list of answer choices for this question.
-	ClosedOptions []string `json:"closed_options"` // OK
+	ClosedOptions string `json:"closed_options"` // OK
 
 	// ChoiceType specifies the possible ways to evaluate responses. It can
 	// currently only be set to 'approval'.
@@ -78,18 +79,18 @@ type Question struct {
 // a value m is performed as (g^r, g^m * y^r) mod p.
 type Key struct {
 	// Generator is the generator element g used in ElGamal encryptions.
-	Generator *big.Int `json:"g"`
+	Generator *big.Int `json:"_g"`
 
 	// Prime is the prime p for the group used in encryption.
-	Prime *big.Int `json:"p"`
+	Prime *big.Int `json:"_p"`
 
 	// ExponentPrime is another prime that specifies the group of exponent
 	// values in the exponent of Generator. It is used in challenge
 	// generation and verification.
-	ExponentPrime *big.Int `json:"q"`
+	ExponentPrime *big.Int `json:"_q"`
 
 	// PublicValue is the public-key value y used to encrypt.
-	PublicValue *big.Int `json:"y"`
+	PublicValue *big.Int `json:"_y"`
 }
 
 // An Election contains all the information about a Helios election.
@@ -176,7 +177,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 	tallies := make([][]*Ciphertext, len(election.Questions))
 	fingerprints := make([]string, len(votes))
 	for i := range tallies {
-		tallies[i] = make([]*Ciphertext, len(election.Questions[i].ClosedOptions))
+		tallies[i] = make([]*Ciphertext, len(strToListString(election.Questions[i].ClosedOptions)))
 		for j := range tallies[i] {
 			// Each tally must start at 1 for the multiplicative
 			// homomorphism to work.
@@ -201,7 +202,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		fingerprints = append(fingerprints, fingerprint)
 
 		for j, q := range election.Questions {
-			for k := range q.ClosedOptions {
+			for k := range strToListString(q.ClosedOptions) {
 				// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
 				voterWeight := FindVoterWeight(votes[i].VoterUuid, voters)
 				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
@@ -221,6 +222,42 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 	}
 
 	return tallies, fingerprints
+}
+
+func strToListString(a string) []string {
+	var b []string
+
+	// Unmarshal the JSON string into the slice of strings
+	err := json.Unmarshal([]byte(a), &b)
+	if err != nil {
+		return nil
+	}
+
+	return b
+}
+
+func strToListBigInt(a string) []*big.Int {
+	var b []*big.Int
+
+	// Unmarshal the JSON string into the slice of Big Int
+	err := UnmarshalJSON([]byte(a), &b)
+	if err != nil {
+		return nil
+	}
+
+	return b
+}
+
+func strToListZKProof(a string) []*ZKProof {
+	var b []*ZKProof
+
+	// Unmarshal the JSON string into the slice of ZKProofs
+	err := UnmarshalJSON([]byte(a), &b)
+	if err != nil {
+		return nil
+	}
+
+	return b
 }
 
 // Retally checks the proofs for a purported Election Result, given the partial
@@ -248,20 +285,20 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 
 	glog.Info("Checking the final tally")
 	for i, q := range election.Questions {
-		if len(result.ResultsTotal[i].AnswerResults) != len(q.ClosedOptions) {
+		if len(result.ResultsTotal[i]) != len(strToListString(q.ClosedOptions)) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
 		}
 
-		for j := range q.ClosedOptions {
+		for j := range strToListString(q.ClosedOptions) {
 			var indices []*big.Int
 			var validTrusteesList []*Trustee
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
 			for _, t := range trustees {
-				if t.Decryptions[0].Decryptions[i].DecryptionProofs == nil || !t.Decryptions[0].Decryptions[i].DecryptionProofs[j].VerifyPartialDecryption(
+				if strToListZKProof(t.Decryptions[0].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[0].DecryptionProofs)[j].VerifyPartialDecryption(
 					tallies[i][j],
-					t.Decryptions[0].Decryptions[i].DecryptionFactors[j],
+					strToListBigInt(t.Decryptions[0].DecryptionFactors)[j],
 					t.PublicKey) {
 					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
 					continue
@@ -283,14 +320,14 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 				// Combine this partial decryption using the
 				// homomorphism.
 				aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
-				aux1 := new(big.Int).Exp(t.Decryptions[0].Decryptions[i].DecryptionFactors[j], aux0, election.PublicKey.Prime)
+				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[0].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
 
 			// Contrary to how it's written in the published spec,
 			// the result must be represented as g^m rather than m,
 			// since everything is done in exponential ElGamal.
-			bigResult := big.NewInt(result.ResultsTotal[i].AnswerResults[j])
+			bigResult := big.NewInt(result.ResultsTotal[i][j])
 			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
 			// (decFactorCombination * bigResult) mod p
 			lhs := new(big.Int).Mul(decFactorCombination, bigResult)
@@ -510,7 +547,7 @@ type CastBallot struct {
 }
 
 type ElectionResult struct {
-	ResultsTotal   []ResultTotal   `json:"results_total"`
+	ResultsTotal   [][]int64       `json:"total_result"`
 	ResultsGrouped []ResultGrouped `json:"results_grouped"`
 }
 
@@ -603,7 +640,7 @@ type LabeledResult []LabeledQuestion
 
 // LabelResults matches up the string questions and answers from an election
 // with the results provided by a tally.
-func (election *Election) LabelResults(results []ResultTotal) LabeledResult {
+func (election *Election) LabelResults(results [][]int64) LabeledResult {
 	maxWeight := float64(1)
 	if election.Normalization {
 		maxWeight = float64(election.MaxWeight)
@@ -611,9 +648,9 @@ func (election *Election) LabelResults(results []ResultTotal) LabeledResult {
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
 		q := election.Questions[i]
-		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.ClosedOptions))}
-		for j := range q.ClosedOptions {
-			labeledRes[i].Answers[j] = LabeledEntry{q.ClosedOptions[j], float64(r.AnswerResults[j]) / maxWeight}
+		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(strToListString(q.ClosedOptions)))}
+		for j := range strToListString(q.ClosedOptions) {
+			labeledRes[i].Answers[j] = LabeledEntry{strToListString(q.ClosedOptions)[j], float64(r[j]) / maxWeight}
 		}
 
 	}

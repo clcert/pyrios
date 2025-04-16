@@ -245,8 +245,19 @@ func (zkproof DisjunctiveZKProof) Verify(min int, max int, ciphertext *Ciphertex
 }
 
 type GroupDecryption struct {
-	Group       string       `json:"group"`
-	Decryptions []Decryption `json:"decryptions"`
+	Group string `json:"group"`
+	// Decryptions []Decryption `json:"decryptions"`
+
+	// TallyType
+	// TallyType string `json:"tally_type"` // OK
+
+	// DecryptionFactors
+	// DecryptionFactors []*big.Int `json:"decryption_factors"` // OK
+	DecryptionFactors string `json:"decryption_factors"` // OK
+
+	// DecryptionProofs
+	// DecryptionProofs []*ZKProof `json:"decryption_proofs"` // OK
+	DecryptionProofs string `json:"decryption_proofs"` // OK
 }
 
 type Decryption struct {

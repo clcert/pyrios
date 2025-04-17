@@ -191,7 +191,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		// Shadow i as a new variable for the goroutine.
 		i := i
 		go func(c chan bool) {
-			glog.Infof("Verifying vote from %s\n", FindVoterUuid(votes[i].VoterUuid, voters))
+			glog.Infof("Verifying vote from %s\n", FindVoterId(votes[i].VoterId, voters))
 			c <- votes[i].Vote.Verify(election)
 			return
 		}(resp)
@@ -204,7 +204,7 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		for j, q := range election.Questions {
 			for k := range strToListString(q.ClosedOptions) {
 				// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
-				voterWeight := FindVoterWeight(votes[i].VoterUuid, voters)
+				voterWeight := FindVoterWeight(votes[i].VoterId, voters)
 				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
 				// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
 				// tallies[j][k].MulCiphertexts(votes[i].Vote.ClosedOptions[j].Choices[k], election.PublicKey.Prime)
@@ -542,8 +542,9 @@ type CastBallot struct {
 	// VoterUuid.
 	// VoterHash string `json:"voter_hash"`
 
-	// VoterUuid is the unique identifier for the Voter that cast Vote.
-	VoterUuid string `json:"voter_uuid"`
+	// VoterId is the unique identifier for the Voter that cast Vote.
+	// VoterUuid string `json:"voter_uuid"`
+	VoterId string `json:"voter_login_id"`
 }
 
 type ElectionResult struct {
@@ -860,9 +861,9 @@ func CalculateLegacyElectionHash(electionJSON []byte) string {
 }
 
 // FindVoterWeight TODO: Add description
-func FindVoterWeight(voterUuid string, voters []*Voter) *big.Int {
+func FindVoterWeight(voterId string, voters []*Voter) *big.Int {
 	for _, voter := range voters {
-		if voter.Uuid == voterUuid {
+		if voter.VoterID == voterId {
 			return big.NewInt(int64(voter.VoterWeight))
 		}
 	}
@@ -889,11 +890,11 @@ func FindVoterLoginId(voterUuid string, voters []*Voter) string {
 	return ""
 }
 
-// FindVoterUuid
-func FindVoterUuid(voterUuid string, voters []*Voter) string {
+// FindVoterId
+func FindVoterId(voterId string, voters []*Voter) string {
 	for _, voter := range voters {
-		if voter.Uuid == voterUuid {
-			return voter.Uuid
+		if voter.VoterID == voterId {
+			return voter.VoterID
 		}
 	}
 	return ""

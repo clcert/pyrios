@@ -296,7 +296,7 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
 			for _, t := range trustees {
-				if strToListZKProof(t.Decryptions[0].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[0].DecryptionProofs)[j].VerifyPartialDecryption(
+				if len(t.Decryptions) == 0 || strToListZKProof(t.Decryptions[0].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[0].DecryptionProofs)[j].VerifyPartialDecryption(
 					tallies[i][j],
 					strToListBigInt(t.Decryptions[0].DecryptionFactors)[j],
 					t.PublicKey) {

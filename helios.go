@@ -42,7 +42,7 @@ type Question struct {
 	// AnswerUrls []string `json:"answer_urls"`
 
 	// ClosedOptions is the list of answer choices for this question.
-	ClosedOptions string `json:"closed_options"` // OK
+	ClosedOptions []string `json:"formal_options"` // OK
 
 	// ChoiceType specifies the possible ways to evaluate responses. It can
 	// currently only be set to 'approval'.
@@ -60,7 +60,7 @@ type Question struct {
 	Min int `json:"min_answers"` // OK
 
 	// Question gives the actual question to answer
-	Question string `json:"q_text"` // OK
+	Question string `json:"title"` // OK
 
 	// ResultType specifies the way in which results should be calculated:
 	// 'absolute' or 'relative'.
@@ -72,6 +72,10 @@ type Question struct {
 	// TallyType specifies the kind of tally to perform. The only valid
 	// value here is 'homomorphic'.
 	TallyType string `json:"tally_type"` // OK
+
+	// IncludeInformalOptions specifies whether or not to include informal options in the options
+	// (blank and void options).
+	// IncludeInformalOptions bool `json:"include_informal_options"` // OK
 }
 
 // A Key is an ElGamal public key. There is one Key in each Election, and it
@@ -157,7 +161,7 @@ type Election struct {
 	MaxWeight int `json:"max_weight"` // OK
 
 	// Normalization specifies if the elecion results must be normalized (divided by MaxWeight)
-	Normalization bool `json:"normalization"` // OK
+	Normalization bool `json:"normalized"` // OK
 }
 
 // Init saves the original election JSON and computes the election hash.
@@ -177,7 +181,8 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 	tallies := make([][]*Ciphertext, len(election.Questions))
 	fingerprints := make([]string, len(votes))
 	for i := range tallies {
-		tallies[i] = make([]*Ciphertext, len(strToListString(election.Questions[i].ClosedOptions)))
+		// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
+		tallies[i] = make([]*Ciphertext, len(election.Questions[i].ClosedOptions)+2)
 		for j := range tallies[i] {
 			// Each tally must start at 1 for the multiplicative
 			// homomorphism to work.
@@ -202,12 +207,19 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		fingerprints = append(fingerprints, fingerprint)
 
 		for j, q := range election.Questions {
-			for k := range strToListString(q.ClosedOptions) {
+			for k := range q.ClosedOptions {
 				// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
 				voterWeight := FindVoterWeight(votes[i].VoterId, voters)
 				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
 				// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
 				// tallies[j][k].MulCiphertexts(votes[i].Vote.ClosedOptions[j].Choices[k], election.PublicKey.Prime)
+				tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
+			}
+			// Handle informal options (blank and void)
+			// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
+			for k := len(q.ClosedOptions); k < len(q.ClosedOptions)+2; k++ {
+				voterWeight := FindVoterWeight(votes[i].VoterId, voters)
+				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
 				tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
 			}
 		}
@@ -285,12 +297,13 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 
 	glog.Info("Checking the final tally")
 	for i, q := range election.Questions {
-		if len(result.ResultsTotal[i]) != len(strToListString(q.ClosedOptions)) {
+		// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
+		if len(result.ResultsTotal[i]) != 2+len(q.ClosedOptions) {
 			glog.Errorf("The results for question %d don't have the right length\n", i)
 			return false
 		}
 
-		for j := range strToListString(q.ClosedOptions) {
+		for j := range q.ClosedOptions {
 			var indices []*big.Int
 			var validTrusteesList []*Trustee
 			decFactorCombination := big.NewInt(1)
@@ -304,8 +317,10 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 					continue
 				}
 
-				indices = append(indices, big.NewInt(int64(t.TrusteeId)))
+				// indices = append(indices, big.NewInt(int64(t.TrusteeId)))
 				validTrusteesList = append(validTrusteesList, t)
+				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
+				indices = append(indices, big.NewInt(int64(len(validTrusteesList))))
 
 				if len(validTrusteesList) == (k + 1) {
 					break
@@ -316,10 +331,12 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 				return false
 			}
 
-			for _, t := range validTrusteesList {
+			for u, t := range validTrusteesList {
 				// Combine this partial decryption using the
 				// homomorphism.
-				aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
+				// aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
+				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
+				aux0 := Lagrange(indices, big.NewInt(int64(u+1)), election.PublicKey.ExponentPrime)
 				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[0].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
@@ -389,7 +406,7 @@ func (prod *Ciphertext) ApplyWeight(weight *big.Int, prime *big.Int) *Ciphertext
 type Voter struct {
 	// Name is the name of the voter. This can be an alias like "V155", if
 	// voter aliases are used in this Election.
-	Name string `json:"voter_name"` // OK
+	Name string `json:"name"` // OK
 
 	// Uuid is a unique identifier for this voter; Helios uses the Uuid as
 	// a key for many of its operations. For example, given a voter uuid
@@ -400,7 +417,7 @@ type Voter struct {
 
 	// VoterID is a string representing the voter. It can be a URL (like an
 	// OpenID URL), or it can be an email address. Or it can be absent.
-	VoterID string `json:"voter_login_id"` // OK
+	VoterID string `json:"username"` // OK
 
 	// VoterIDHash is the hash of a VoterID; this can be present even if the
 	// VoterID is absent.
@@ -410,7 +427,7 @@ type Voter struct {
 	// VoterType string `json:"voter_type"`
 
 	// VoterWeight is the weight of the voter in the current election
-	VoterWeight int `json:"voter_weight"` // OK
+	VoterWeight int `json:"weight_end"` // OK
 }
 
 // An EncryptedAnswer is part of a Ballot cast by a Voter. It is the answer to
@@ -649,9 +666,9 @@ func (election *Election) LabelResults(results [][]int64) LabeledResult {
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
 		q := election.Questions[i]
-		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(strToListString(q.ClosedOptions)))}
-		for j := range strToListString(q.ClosedOptions) {
-			labeledRes[i].Answers[j] = LabeledEntry{strToListString(q.ClosedOptions)[j], float64(r[j]) / maxWeight}
+		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.ClosedOptions))}
+		for j := range q.ClosedOptions {
+			labeledRes[i].Answers[j] = LabeledEntry{q.ClosedOptions[j], float64(r[j]) / maxWeight}
 		}
 
 	}

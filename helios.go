@@ -309,9 +309,9 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
 			for _, t := range trustees {
-				if len(t.Decryptions) == 0 || strToListZKProof(t.Decryptions[0].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[0].DecryptionProofs)[j].VerifyPartialDecryption(
+				if len(t.Decryptions) == 0 || strToListZKProof(t.Decryptions[i].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[i].DecryptionProofs)[j].VerifyPartialDecryption(
 					tallies[i][j],
-					strToListBigInt(t.Decryptions[0].DecryptionFactors)[j],
+					strToListBigInt(t.Decryptions[i].DecryptionFactors)[j],
 					t.PublicKey) {
 					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
 					continue
@@ -337,7 +337,7 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 				// aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
 				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
 				aux0 := Lagrange(indices, big.NewInt(int64(u+1)), election.PublicKey.ExponentPrime)
-				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[0].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
+				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[i].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
 

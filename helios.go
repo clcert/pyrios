@@ -23,6 +23,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -308,7 +309,7 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 			var validTrusteesList []*Trustee
 			decFactorCombination := big.NewInt(1)
 			k := len(trustees) / 2
-			for _, t := range trustees {
+			for p, t := range trustees {
 				if len(t.Decryptions) == 0 || strToListZKProof(t.Decryptions[i].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[i].DecryptionProofs)[j].VerifyPartialDecryption(
 					tallies[i][j],
 					strToListBigInt(t.Decryptions[i].DecryptionFactors)[j],
@@ -320,7 +321,7 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 				// indices = append(indices, big.NewInt(int64(t.TrusteeId)))
 				validTrusteesList = append(validTrusteesList, t)
 				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
-				indices = append(indices, big.NewInt(int64(len(validTrusteesList))))
+				indices = append(indices, big.NewInt(int64(p+1)))
 
 				if len(validTrusteesList) == (k + 1) {
 					break
@@ -336,7 +337,7 @@ func (election *Election) Retally(votes []*CastBallot, result ElectionResult, tr
 				// homomorphism.
 				// aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
 				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
-				aux0 := Lagrange(indices, big.NewInt(int64(u+1)), election.PublicKey.ExponentPrime)
+				aux0 := Lagrange(indices, indices[u], election.PublicKey.ExponentPrime)
 				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[i].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
 				decFactorCombination.Mul(decFactorCombination, aux1)
 			}
@@ -666,10 +667,13 @@ func (election *Election) LabelResults(results [][]int64) LabeledResult {
 	labeledRes := make([]LabeledQuestion, len(results))
 	for i, r := range results {
 		q := election.Questions[i]
-		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.ClosedOptions))}
+		labeledRes[i] = LabeledQuestion{q.Question, make([]LabeledEntry, len(q.ClosedOptions)+2)}
 		for j := range q.ClosedOptions {
 			labeledRes[i].Answers[j] = LabeledEntry{q.ClosedOptions[j], float64(r[j]) / maxWeight}
 		}
+		// Handle informal options (blank and null)
+		labeledRes[i].Answers[len(q.ClosedOptions)] = LabeledEntry{"Voto Blanco", float64(r[len(q.ClosedOptions)]) / maxWeight}
+		labeledRes[i].Answers[len(q.ClosedOptions)+1] = LabeledEntry{"Voto Nulo", float64(r[len(q.ClosedOptions)+1]) / maxWeight}
 
 	}
 
@@ -825,11 +829,28 @@ func GetJSON(addr string, v interface{}, client *http.Client) ([]byte, error) {
 // all numbers. This would be parsed incorrectly and would fail in unmarshalling.
 // TODO(tmroeder): add more context to the regular expression.
 var quotedBigIntRegex = regexp.MustCompile(`"([0-9][0-9]*)"`)
+var quotedStringFieldRegex = regexp.MustCompile(`("(username|voter_login_id|uuid|voter_id_hash|name|voter_type)"\s*:\s*")([0-9][0-9]*)(")`)
 
 // UnmarshalJSON wraps json.Marshal and fixes inconsistencies between Helios JSON and Go JSON.
 // Note that this function doesn't have to undo everything that MarshalJSON does.
 func UnmarshalJSON(jsonData []byte, v interface{}) error {
-	parsedData := quotedBigIntRegex.ReplaceAll(jsonData, []byte(`$1`))
+	protected := make([]string, 0)
+	safeData := quotedStringFieldRegex.ReplaceAllStringFunc(string(jsonData), func(match string) string {
+		subs := quotedStringFieldRegex.FindStringSubmatch(match)
+		if len(subs) != 5 {
+			return match
+		}
+		protected = append(protected, subs[0])
+		return `"__PROTECTED_` + fmt.Sprint(len(protected)-1) + `__"`
+	})
+
+	parsedData := quotedBigIntRegex.ReplaceAll([]byte(safeData), []byte(`$1`))
+	for i, value := range protected {
+		placeholder := []byte(`"__PROTECTED_` + fmt.Sprint(i) + `__"`)
+		restore := []byte(value)
+		parsedData = bytes.ReplaceAll(parsedData, placeholder, restore)
+	}
+
 	err := json.Unmarshal(parsedData, v)
 	if err != nil {
 		glog.Errorf("Could not unmarshal the data: %s\n", err)

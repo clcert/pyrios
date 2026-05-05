@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/golang/glog"
 )
@@ -176,65 +177,108 @@ func (election *Election) Init(json []byte) {
 // AccumulateTallies combines the ballots homomorphically for each question and answer
 // to get an encrypted tally for each. It also compute the ballot tracking numbers for
 // each of the votes.
-func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter) ([][]*Ciphertext, []string) {
+func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter) []map[string]interface{} {
 	// Initialize the tally structures for homomorphic accumulation.
 
-	tallies := make([][]*Ciphertext, len(election.Questions))
-	fingerprints := make([]string, len(votes))
-	for i := range tallies {
-		// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
-		tallies[i] = make([]*Ciphertext, len(election.Questions[i].ClosedOptions)+2)
-		for j := range tallies[i] {
-			// Each tally must start at 1 for the multiplicative
-			// homomorphism to work.
-			tallies[i][j] = &Ciphertext{big.NewInt(1), big.NewInt(1)}
-		}
-	}
+	groups := GetVoterGroups(voters)
+	groupTallies := make([]map[string]interface{}, len(groups))
 
-	// Verify the votes and accumulate the tallies.
-	resp := make(chan bool)
-	for i := range votes {
-		// Shadow i as a new variable for the goroutine.
-		i := i
-		go func(c chan bool) {
-			glog.Infof("Verifying vote from %s\n", FindVoterId(votes[i].VoterId, voters))
-			c <- votes[i].Vote.Verify(election)
-			return
-		}(resp)
-
-		h := sha256.Sum256(votes[i].JSON)
-		encodedHash := base64.StdEncoding.EncodeToString(h[:])
-		fingerprint := encodedHash[:len(encodedHash)-1]
-		fingerprints = append(fingerprints, fingerprint)
-
-		for j, q := range election.Questions {
-			for k := range q.ClosedOptions {
-				// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
-				voterWeight := FindVoterWeight(votes[i].VoterId, voters)
-				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
-				// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
-				// tallies[j][k].MulCiphertexts(votes[i].Vote.ClosedOptions[j].Choices[k], election.PublicKey.Prime)
-				tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
-			}
-			// Handle informal options (blank and void)
+	for groupIdx, g := range groups {
+		// only get votes from the current group
+		groupedVotes := FindGroupedVotes(votes, g, voters)
+		tallies := make([][]*Ciphertext, len(election.Questions))
+		fingerprints := make([]string, len(groupedVotes))
+		for tally := range tallies {
 			// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
-			for k := len(q.ClosedOptions); k < len(q.ClosedOptions)+2; k++ {
-				voterWeight := FindVoterWeight(votes[i].VoterId, voters)
-				auxCiphertext := votes[i].Vote.Answers[j].Choices[k]
-				tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
+			tallies[tally] = make([]*Ciphertext, len(election.Questions[tally].ClosedOptions)+2)
+			for j := range tallies[tally] {
+				// Each tally must start at 1 for the multiplicative
+				// homomorphism to work.
+				tallies[tally][j] = &Ciphertext{big.NewInt(1), big.NewInt(1)}
 			}
 		}
+
+		// Verify the votes and accumulate the tallies.
+		resp := make(chan bool)
+
+		for _, groupedVote := range groupedVotes {
+			// Shadow i as a new variable for the goroutine.
+			//i := i
+			go func(c chan bool) {
+				// glog.Infof("Verifying vote from %s\n", FindVoterId(votes[i].VoterId, voters))
+				glog.Infof("Verifying vote %s\n", groupedVote.VoteHash)
+				c <- groupedVote.Vote.Verify(election)
+				return
+			}(resp)
+
+			h := sha256.Sum256(groupedVote.JSON)
+			encodedHash := base64.StdEncoding.EncodeToString(h[:])
+			fingerprint := encodedHash[:len(encodedHash)-1]
+			fingerprints = append(fingerprints, fingerprint)
+
+			for j, q := range election.Questions {
+				for k := range q.ClosedOptions {
+					// ballot_i_j_k = (ballot_i_j_k ^ weight) mod p
+					voterWeight := FindVoterWeight(groupedVote.VoterId, voters)
+					auxCiphertext := groupedVote.Vote.Answers[j].Choices[k]
+					// tally_j_k = (tally_j_k * ballot_i_j_k) mod p
+					// tallies[j][k].MulCiphertexts(groupedVote.Vote.ClosedOptions[j].Choices[k], election.PublicKey.Prime)
+					tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
+				}
+				// Handle informal options (blank and void)
+				// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
+				for k := len(q.ClosedOptions); k < len(q.ClosedOptions)+2; k++ {
+					voterWeight := FindVoterWeight(groupedVote.VoterId, voters)
+					auxCiphertext := groupedVote.Vote.Answers[j].Choices[k]
+					tallies[j][k].MulCiphertexts(auxCiphertext.ApplyWeight(voterWeight, election.PublicKey.Prime), election.PublicKey.Prime)
+				}
+			}
+		}
+
+		// Make sure all the votes passed verification.
+		for _ = range groupedVotes {
+			if !<-resp {
+				glog.Error("Vote verification failed")
+				return nil
+			}
+		}
+
+		// return tallies, fingerprints
+		groupTallies[groupIdx] = map[string]interface{}{"group": g, "tallies": tallies, "fingerprints": fingerprints}
+
 	}
 
-	// Make sure all the votes passed verification.
-	for _ = range votes {
-		if !<-resp {
-			glog.Error("Vote verification failed")
-			return nil, nil
+	return groupTallies
+
+}
+
+func FindGroupedVotes(votes []*CastBallot, group string, voters []*Voter) []*CastBallot {
+	var groupedVotes []*CastBallot
+	for _, vote := range votes {
+		if FindVoterGroup(vote.VoterId, voters) == group {
+			groupedVotes = append(groupedVotes, vote)
 		}
 	}
+	return groupedVotes
+}
 
-	return tallies, fingerprints
+func FindVoterGroup(voterId string, voters []*Voter) string {
+	for _, voter := range voters {
+		if voter.VoterID == voterId {
+			return voter.VoterGroup
+		}
+	}
+	return ""
+}
+
+func GetVoterGroups(voters []*Voter) []string {
+	var groups = []string{}
+	for _, voter := range voters {
+		if !slices.Contains(groups, voter.VoterGroup) {
+			groups = append(groups, voter.VoterGroup)
+		}
+	}
+	return groups
 }
 
 func strToListString(a string) []string {
@@ -282,88 +326,137 @@ func strToListZKProof(a string) []*ZKProof {
 // exponentiating the Election.PublicKey.Generator value with this value and
 // checking that it matches the decrypted value.
 func (election *Election) Retally(votes []*CastBallot, result ElectionResult, trustees []*Trustee, voters []*Voter) bool {
-	tallies, voteFingerprints := election.AccumulateTallies(votes, voters)
-	if len(voteFingerprints) == 0 {
-		glog.Error("Some votes didn't pass verification")
-		return false
-	}
-
-	glog.Info("All cast ballots pass verification")
-
-	if len(result.ResultsTotal) != len(election.Questions) {
-		glog.Error("The results do not contain the right number of answers")
-		glog.Error("Maybe the election hasn't closed yet?")
-		return false
-	}
-
-	glog.Info("Checking the final tally")
-	for i, q := range election.Questions {
-		// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
-		if len(result.ResultsTotal[i]) != 2+len(q.ClosedOptions) {
-			glog.Errorf("The results for question %d don't have the right length\n", i)
+	groupedTallies := election.AccumulateTallies(votes, voters)
+	for _, groupTally := range groupedTallies {
+		tallies, ok := groupTally["tallies"].([][]*Ciphertext)
+		if !ok {
+			glog.Error("Invalid tallies data")
 			return false
 		}
 
-		for j := range q.ClosedOptions {
-			var indices []*big.Int
-			var validTrusteesList []*Trustee
-			decFactorCombination := big.NewInt(1)
-			k := len(trustees) / 2
-			for p, t := range trustees {
-				if len(t.Decryptions) == 0 || strToListZKProof(t.Decryptions[i].DecryptionProofs) == nil || !strToListZKProof(t.Decryptions[i].DecryptionProofs)[j].VerifyPartialDecryption(
-					tallies[i][j],
-					strToListBigInt(t.Decryptions[i].DecryptionFactors)[j],
-					t.PublicKey) {
-					glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
-					continue
-				}
+		voteFingerprints, ok := groupTally["fingerprints"].([]string)
+		if !ok {
+			glog.Error("Invalid fingerprints data")
+			return false
+		}
 
-				// indices = append(indices, big.NewInt(int64(t.TrusteeId)))
-				validTrusteesList = append(validTrusteesList, t)
-				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
-				indices = append(indices, big.NewInt(int64(p+1)))
+		if len(voteFingerprints) == 0 {
+			glog.Error("Some votes didn't pass verification")
+			return false
+		}
 
-				if len(validTrusteesList) == (k + 1) {
-					break
-				}
-			}
-			if len(validTrusteesList) < (k + 1) {
-				glog.Errorf("Not enough valid trustees\n")
+		if groupTally["group"].(string) != "" {
+			glog.Info("All cast ballots from group '" + groupTally["group"].(string) + "' pass verification")
+		} else {
+			glog.Info("All cast ballots pass verification")
+		}
+
+		if len(result.ResultsTotal) != len(election.Questions) {
+			glog.Error("The results do not contain the right number of answers")
+			glog.Error("Maybe the election hasn't closed yet?")
+			return false
+		}
+
+		if groupTally["group"].(string) != "" {
+			glog.Info("Checking the final tally for group '" + groupTally["group"].(string) + "'")
+		} else {
+			glog.Info("Checking the final tally")
+		}
+
+		for i, q := range election.Questions {
+			// TODO: use IncludeInformalOptions to check if it's necessary to add the two extra options for blank and void votes.
+			if len(result.ResultsTotal[i]) != 2+len(q.ClosedOptions) {
+				glog.Errorf("The results for question %d don't have the right length\n", i)
 				return false
 			}
 
-			for u, t := range validTrusteesList {
-				// Combine this partial decryption using the
-				// homomorphism.
-				// aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
-				// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
-				aux0 := Lagrange(indices, indices[u], election.PublicKey.ExponentPrime)
-				aux1 := new(big.Int).Exp(strToListBigInt(t.Decryptions[i].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
-				decFactorCombination.Mul(decFactorCombination, aux1)
-			}
+			for j := 0; j < len(q.ClosedOptions)+2; j++ {
+				var indices []*big.Int
+				var validTrusteesList []*Trustee
+				decFactorCombination := big.NewInt(1)
+				k := len(trustees) / 2
+				for p, t := range trustees {
+					groupDecryptions := getGroupDecryptions(t.Decryptions, groupTally["group"].(string))
+					if len(groupDecryptions) == 0 || strToListZKProof(groupDecryptions[i].DecryptionProofs) == nil || !strToListZKProof(groupDecryptions[i].DecryptionProofs)[j].VerifyPartialDecryption(
+						tallies[i][j],
+						strToListBigInt(groupDecryptions[i].DecryptionFactors)[j],
+						t.PublicKey) {
+						glog.Errorf("The partial decryption proof from trustee #%d for (%d, %d) failed\n", t.TrusteeId, i, j)
+						continue
+					}
 
-			// Contrary to how it's written in the published spec,
-			// the result must be represented as g^m rather than m,
-			// since everything is done in exponential ElGamal.
-			bigResult := big.NewInt(result.ResultsTotal[i][j])
-			bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
-			// (decFactorCombination * bigResult) mod p
-			lhs := new(big.Int).Mul(decFactorCombination, bigResult)
-			lhs.Mod(lhs, election.PublicKey.Prime)
+					// indices = append(indices, big.NewInt(int64(t.TrusteeId)))
+					validTrusteesList = append(validTrusteesList, t)
+					// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
+					indices = append(indices, big.NewInt(int64(p+1)))
 
-			// tally_i_j.Beta mod p
-			rhs := new(big.Int).Mod(tallies[i][j].Beta, election.PublicKey.Prime)
+					if len(validTrusteesList) == (k + 1) {
+						break
+					}
+				}
+				if len(validTrusteesList) < (k + 1) {
+					glog.Errorf("Not enough valid trustees\n")
+					return false
+				}
 
-			// These should match if the combination of the partial
-			// decryptions was correct.
-			if lhs.Cmp(rhs) != 0 {
-				glog.Errorf("The decryption factor check failed for question %d and answer %d\n", i, j)
-				return false
+				for u, t := range validTrusteesList {
+					groupDecryptions := getGroupDecryptions(t.Decryptions, groupTally["group"].(string))
+					// Combine this partial decryption using the
+					// homomorphism.
+					// aux0 := Lagrange(indices, big.NewInt(int64(t.TrusteeId)), election.PublicKey.ExponentPrime)
+					// TODO: use TrusteeElectionId instead of TrusteeId to get the index of the trustee in the election
+					aux0 := Lagrange(indices, indices[u], election.PublicKey.ExponentPrime)
+					aux1 := new(big.Int).Exp(strToListBigInt(groupDecryptions[i].DecryptionFactors)[j], aux0, election.PublicKey.Prime)
+					decFactorCombination.Mul(decFactorCombination, aux1)
+				}
+
+				// Contrary to how it's written in the published spec,
+				// the result must be represented as g^m rather than m,
+				// since everything is done in exponential ElGamal.
+				groupResults := getGroupResults(result.ResultsGrouped, groupTally["group"].(string))
+				bigResult := big.NewInt(groupResults[i][j])
+				bigResult.Exp(election.PublicKey.Generator, bigResult, election.PublicKey.Prime)
+				// (decFactorCombination * bigResult) mod p
+				lhs := new(big.Int).Mul(decFactorCombination, bigResult)
+				lhs.Mod(lhs, election.PublicKey.Prime)
+
+				// tally_i_j.Beta mod p
+				rhs := new(big.Int).Mod(tallies[i][j].Beta, election.PublicKey.Prime)
+
+				// These should match if the combination of the partial
+				// decryptions was correct.
+				if lhs.Cmp(rhs) != 0 {
+					glog.Errorf("The decryption factor check failed for question %d and answer %d\n", i, j)
+					return false
+				}
 			}
 		}
+
 	}
 
 	return true
+}
+
+func getGroupResults(resultGrouped []ResultGrouped, group string) [][]int64 {
+	if group == "" {
+		group = "Sin grupo"
+	}
+	for _, r := range resultGrouped {
+		if r.Group == group {
+			return r.Result
+		}
+	}
+	return [][]int64{}
+}
+
+func getGroupDecryptions(decryptions []*GroupDecryption, group string) []*GroupDecryption {
+	groupDecryptions := []*GroupDecryption{}
+	for _, d := range decryptions {
+		if d.Group == group {
+			groupDecryptions = append(groupDecryptions, d)
+		}
+	}
+	return groupDecryptions
 }
 
 // A Ciphertext is an ElGamal ciphertext, where g is Key.Generator, r is a
@@ -429,6 +522,9 @@ type Voter struct {
 
 	// VoterWeight is the weight of the voter in the current election
 	VoterWeight int `json:"weight_end"` // OK
+
+	// VoterGroup is the group to which the voter belongs in the current election
+	VoterGroup string `json:"group"` // OK
 }
 
 // An EncryptedAnswer is part of a Ballot cast by a Voter. It is the answer to
@@ -567,7 +663,7 @@ type CastBallot struct {
 
 type ElectionResult struct {
 	ResultsTotal   [][]int64       `json:"total_result"`
-	ResultsGrouped []ResultGrouped `json:"results_grouped"`
+	ResultsGrouped []ResultGrouped `json:"grouped_result"`
 }
 
 type ResultTotal struct {
@@ -580,7 +676,7 @@ type ResultGrouped struct {
 	Group string `json:"group"`
 
 	// Result
-	Result []Result `json:"result"`
+	Result [][]int64 `json:"result"`
 }
 
 type Result struct {

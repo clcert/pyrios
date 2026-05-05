@@ -88,6 +88,14 @@ func main() {
 			fmt.Println("The election passes verification")
 
 			fmt.Println("The results are as follows:")
+			if len(b.Result.ResultsGrouped) != 0 && b.Result.ResultsGrouped[0].Group != "Sin grupo" {
+				for _, groupedResult := range b.Result.ResultsGrouped {
+					fmt.Println("\nGroup: " + groupedResult.Group)
+					lr := b.Election.LabelResults(groupedResult.Result)
+					fmt.Printf("%s", lr.toString(b.Election.Normalization))
+				}
+			}
+			fmt.Println("\nTotal Results:")
 			lr := b.Election.LabelResults(b.Result.ResultsTotal)
 			fmt.Printf("%s", lr.toString(b.Election.Normalization))
 		} else {

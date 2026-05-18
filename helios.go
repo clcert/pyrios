@@ -202,14 +202,11 @@ func (election *Election) AccumulateTallies(votes []*CastBallot, voters []*Voter
 		resp := make(chan bool)
 
 		for _, groupedVote := range groupedVotes {
-			// Shadow i as a new variable for the goroutine.
-			//i := i
-			go func(c chan bool) {
-				// glog.Infof("Verifying vote from %s\n", FindVoterId(votes[i].VoterId, voters))
-				glog.Infof("Verifying vote %s\n", groupedVote.VoteHash)
-				c <- groupedVote.Vote.Verify(election)
-				return
-			}(resp)
+			gv := groupedVote
+			go func(c chan bool, vote *CastBallot) {
+				glog.Infof("Verifying vote %s\n", vote.VoteHash)
+				c <- vote.Vote.Verify(election)
+			}(resp, gv)
 
 			h := sha256.Sum256(groupedVote.JSON)
 			encodedHash := base64.StdEncoding.EncodeToString(h[:])
